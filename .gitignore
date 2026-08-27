@@ -1,0 +1,27 @@
+# User-specific runtime settings (may contain API keys)
+UmiOCR-data/.settings
+UmiOCR-data/.pre_settings
+
+# Generated caches and temporary files
+**/__pycache__/
+*.pyc
+*.pyo
+*.log
+*.tmp
+logs/
+UmiOCR-data/logs/
+UmiOCR-data/temp_doc/
+
+# Internal agent review artifacts
+.superpowers/
+
+# Batch OCR generated tables
+**/[[]OCR[]]_*.csv
+**/.~lock*
+
+# Local OCR test corpus
+/测试文件/
+
+# OS metadata
+Thumbs.db
+.DS_Store
