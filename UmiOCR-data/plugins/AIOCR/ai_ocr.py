@@ -17,6 +17,34 @@ import importlib.util
 import sys
 import types
 
+NO_TEXT_TOKEN = "<<<UMI_OCR_NO_TEXT_7F3A>>>"
+KEYCAP_EMOJI_RE = re.compile(r"[0-9#*]\ufe0f?\u20e3")
+EMOJI_RE = re.compile(
+    "["
+    "\U0001F1E6-\U0001F1FF"
+    "\U0001F300-\U0001F5FF"
+    "\U0001F600-\U0001F64F"
+    "\U0001F680-\U0001F6FF"
+    "\U0001F700-\U0001F77F"
+    "\U0001F780-\U0001F7FF"
+    "\U0001F800-\U0001F8FF"
+    "\U0001F900-\U0001F9FF"
+    "\U0001FA00-\U0001FAFF"
+    "\u2600-\u27BF"
+    "\u2B00-\u2BFF"
+    "]+"
+)
+
+
+def remove_emoji(text):
+    """删除模型将装饰图形转写成的 Emoji 及其组合控制符。"""
+    if not isinstance(text, str):
+        return text
+    text = KEYCAP_EMOJI_RE.sub("", text)
+    text = EMOJI_RE.sub("", text)
+    return text.replace("\ufe0f", "").replace("\u200d", "")
+
+
 def remove_image_tags(text):
     """移除文本中的所有HTML标签"""
     if not text:
@@ -3021,9 +3049,9 @@ class Api:
         
         lang_instruction = lang_map.get(language, "自动检测语言")
         
-        default_text_only = "识别图片中的文字，语言：{language}。保持原有格式，直接返回文字内容。"
-        default_with_coordinates = '识别图片文字并返回坐标，语言：{language}\n输出JSON格式：{{"texts": [{{"text": "文字内容", "box": [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]}}]}}\n坐标为像素位置，左上角为原点。直接返回JSON，无其他内容。'
-        default_markdown = "识别图片中的文字，语言：{language}。以Markdown格式输出，保留标题、列表、表格、加粗、斜体等结构。直接返回Markdown内容，无其他说明。"
+        default_text_only = "你是严格的OCR转录器。逐字识别图片中真实存在的文字，语言：{language}，保持原有换行和格式。忽略礼盒、星星、人物等所有装饰性图形，不得将图形转换成Emoji、符号或文字说明。如果图片中没有任何可识别文字，只返回<<<UMI_OCR_NO_TEXT_7F3A>>>；否则只返回识别到的文字，不得添加解释。"
+        default_with_coordinates = '你是严格的OCR转录器。逐字识别图片中真实存在的文字并返回坐标，语言：{language}。忽略礼盒、星星、人物等所有装饰性图形，不得将图形转换成Emoji、符号或文字说明。如果图片中没有任何可识别文字，只返回<<<UMI_OCR_NO_TEXT_7F3A>>>。否则输出JSON格式：{{"texts": [{{"text": "文字内容", "box": [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]}}]}}。坐标为像素位置，左上角为原点。只返回JSON，不得添加解释。'
+        default_markdown = "你是严格的OCR转录器。逐字识别图片中真实存在的文字，语言：{language}，以Markdown格式保留标题、列表、表格、加粗、斜体和换行结构。忽略礼盒、星星、人物等所有装饰性图形，不得将图形转换成Emoji、符号或文字说明。如果图片中没有任何可识别文字，只返回<<<UMI_OCR_NO_TEXT_7F3A>>>；否则只返回Markdown内容，不得添加解释。"
         
         if output_format == "with_coordinates":
             template = self.global_config.get("a_prompt_with_coordinates", "").strip()
@@ -3036,6 +3064,12 @@ class Api:
             prompt = template.replace("{language}", lang_instruction) if template else default_text_only.replace("{language}", lang_instruction)
         if language in ("auto", "zh"):
             prompt += "\n严格禁止对中文进行繁体/简体转换、全角/半角转换、字符归一化；混合繁简时保持混合状态。逐字抄写图像字符，不要重写。示例：不要把 '台灣里体干' 改为 '臺灣裏體幹'，也不要相反。"
+        if NO_TEXT_TOKEN not in prompt:
+            prompt += (
+                "\n忽略礼盒、星星、人物等所有装饰性图形，不得将图形转换成 Emoji、"
+                "符号或文字说明。如果图片中没有任何可识别文字，只返回："
+                f"{NO_TEXT_TOKEN}。除该标记外不得返回任何其他内容。"
+            )
         
         return prompt
     
@@ -4110,12 +4144,19 @@ class Api:
 
         output_format = getattr(self, '_current_output_format', 'text_only')
 
-        if output_format == 'markdown':
-            return result
+        def sanitize_text(text):
+            text = remove_emoji(text)
+            if NO_TEXT_TOKEN in text:
+                return ""
+            if output_format != 'markdown':
+                text = remove_hash_symbol(text)
+            return text
 
         data = result.get("data")
         if isinstance(data, str):
-            result["data"] = remove_hash_symbol(data)
+            result["data"] = sanitize_text(data)
+            if result.get("code") == 100 and not result["data"].strip():
+                return self._create_empty_result()
             return result
 
         if isinstance(data, list):
@@ -4124,14 +4165,22 @@ class Api:
                 if isinstance(item, dict):
                     new_item = dict(item)
                     if "text" in new_item:
-                        new_item["text"] = remove_hash_symbol(new_item.get("text", ""))
+                        new_item["text"] = sanitize_text(new_item.get("text", ""))
                     sanitized.append(new_item)
                 elif isinstance(item, str):
-                    sanitized.append(remove_hash_symbol(item))
+                    sanitized.append(sanitize_text(item))
                 else:
                     sanitized.append(item)
             result["data"] = sanitized
+            if result.get("code") == 100:
+                has_text = any(
+                    item.get("text", "").strip()
+                    if isinstance(item, dict)
+                    else item.strip() if isinstance(item, str) else False
+                    for item in sanitized
+                )
+                if not has_text:
+                    return self._create_empty_result()
             return result
 
         return result
-
