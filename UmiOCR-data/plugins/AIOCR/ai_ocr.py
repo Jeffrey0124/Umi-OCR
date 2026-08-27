@@ -45,6 +45,37 @@ def remove_emoji(text):
     return text.replace("\ufe0f", "").replace("\u200d", "")
 
 
+def to_simplified_chinese(text):
+    """使用 Windows 原生字符映射将繁体中文统一为简体中文。"""
+    if not isinstance(text, str) or not text:
+        return text
+    try:
+        import ctypes
+
+        converter = ctypes.windll.kernel32.LCMapStringEx
+        simplified_chinese = 0x02000000
+        length = converter(
+            "zh-CN", simplified_chinese, text, len(text), None, 0, None, None, 0
+        )
+        if length <= 0:
+            return text
+        output = ctypes.create_unicode_buffer(length + 1)
+        converted = converter(
+            "zh-CN",
+            simplified_chinese,
+            text,
+            len(text),
+            output,
+            length,
+            None,
+            None,
+            0,
+        )
+        return output.value if converted > 0 else text
+    except Exception:
+        return text
+
+
 def remove_image_tags(text):
     """移除文本中的所有HTML标签"""
     if not text:
@@ -2688,7 +2719,7 @@ class Api:
             if isinstance(ai_only_coords, dict) and ai_only_coords.get("code") == 100:
                 return ai_only_coords
             return self._run_ocr(image_base64, {"output_format": "text_only", "language": language})
-        variant_note = ("严格禁止对中文进行繁体/简体转换、全角/半角转换、字符归一化；混合繁简时保持混合状态。逐字抄写图像字符，不要重写。示例：不要把 '台灣里体干' 改为 '臺灣裏體幹'，也不要相反。\n" if language in ("auto", "zh") else "")
+        variant_note = ("所有中文必须统一输出为中国大陆规范简体中文，不得输出繁体字；英文字母、数字和标点符号保持原样。逐字抄写图像字符，不要重写。\n" if language in ("auto", "zh") else "")
         prompt = (
             f"请识别这张图片中的文字，语言：{lang_instruction}。\n"
             "图片已通过文本检测模块切分为多个文本块，下面是各文本块的位置坐标（按从上到下顺序）。\n"
@@ -2911,6 +2942,7 @@ class Api:
                 local = getattr(self, 'local_config', {})
                 output_format = local.get('output_format', 'text_only')
                 self._current_output_format = output_format
+                self._current_language = local.get('language', 'auto')
                 provider_name = self.global_config.get("a_provider", self.global_config.get("provider", "openai"))
                 # markdown格式：PaddleOCR-VL/StructureV3原生支持markdown，直接调用API获取
                 if output_format == 'markdown' and provider_name in ('paddle_vl_16', 'pp_structure_v3'):
@@ -2928,6 +2960,7 @@ class Api:
                     result = self._run_paddle_first_correction(imageBase64)
             else:
                 self._current_output_format = 'text_only'
+                self._current_language = 'auto'
                 # 预处理图像
                 processed_base64 = self._preprocess_image(imageBase64)
                 # 执行OCR
@@ -3049,9 +3082,9 @@ class Api:
         
         lang_instruction = lang_map.get(language, "自动检测语言")
         
-        default_text_only = "你是严格的OCR转录器。逐字识别图片中真实存在的文字，语言：{language}，保持原有换行和格式。忽略礼盒、星星、人物等所有装饰性图形，不得将图形转换成Emoji、符号或文字说明。如果图片中没有任何可识别文字，只返回<<<UMI_OCR_NO_TEXT_7F3A>>>；否则只返回识别到的文字，不得添加解释。"
-        default_with_coordinates = '你是严格的OCR转录器。逐字识别图片中真实存在的文字并返回坐标，语言：{language}。忽略礼盒、星星、人物等所有装饰性图形，不得将图形转换成Emoji、符号或文字说明。如果图片中没有任何可识别文字，只返回<<<UMI_OCR_NO_TEXT_7F3A>>>。否则输出JSON格式：{{"texts": [{{"text": "文字内容", "box": [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]}}]}}。坐标为像素位置，左上角为原点。只返回JSON，不得添加解释。'
-        default_markdown = "你是严格的OCR转录器。逐字识别图片中真实存在的文字，语言：{language}，以Markdown格式保留标题、列表、表格、加粗、斜体和换行结构。忽略礼盒、星星、人物等所有装饰性图形，不得将图形转换成Emoji、符号或文字说明。如果图片中没有任何可识别文字，只返回<<<UMI_OCR_NO_TEXT_7F3A>>>；否则只返回Markdown内容，不得添加解释。"
+        default_text_only = "你是严格的OCR转录器。逐字识别图片中真实存在的文字，语言：{language}，保持原有换行和格式。所有中文必须统一输出为中国大陆规范简体中文，不得输出繁体字。忽略礼盒、星星、人物等所有装饰性图形，不得将图形转换成Emoji、符号或文字说明。如果图片中没有任何可识别文字，只返回<<<UMI_OCR_NO_TEXT_7F3A>>>；否则只返回识别到的文字，不得添加解释。"
+        default_with_coordinates = '你是严格的OCR转录器。逐字识别图片中真实存在的文字并返回坐标，语言：{language}。所有中文必须统一输出为中国大陆规范简体中文，不得输出繁体字。忽略礼盒、星星、人物等所有装饰性图形，不得将图形转换成Emoji、符号或文字说明。如果图片中没有任何可识别文字，只返回<<<UMI_OCR_NO_TEXT_7F3A>>>。否则输出JSON格式：{{"texts": [{{"text": "文字内容", "box": [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]}}]}}。坐标为像素位置，左上角为原点。只返回JSON，不得添加解释。'
+        default_markdown = "你是严格的OCR转录器。逐字识别图片中真实存在的文字，语言：{language}，以Markdown格式保留标题、列表、表格、加粗、斜体和换行结构。所有中文必须统一输出为中国大陆规范简体中文，不得输出繁体字。忽略礼盒、星星、人物等所有装饰性图形，不得将图形转换成Emoji、符号或文字说明。如果图片中没有任何可识别文字，只返回<<<UMI_OCR_NO_TEXT_7F3A>>>；否则只返回Markdown内容，不得添加解释。"
         
         if output_format == "with_coordinates":
             template = self.global_config.get("a_prompt_with_coordinates", "").strip()
@@ -3063,7 +3096,7 @@ class Api:
             template = self.global_config.get("a_prompt_text_only", "").strip()
             prompt = template.replace("{language}", lang_instruction) if template else default_text_only.replace("{language}", lang_instruction)
         if language in ("auto", "zh"):
-            prompt += "\n严格禁止对中文进行繁体/简体转换、全角/半角转换、字符归一化；混合繁简时保持混合状态。逐字抄写图像字符，不要重写。示例：不要把 '台灣里体干' 改为 '臺灣裏體幹'，也不要相反。"
+            prompt += "\n所有中文必须统一输出为中国大陆规范简体中文，不得输出繁体字；英文字母、数字和标点符号保持原样。逐字抄写图像字符，不要重写。"
         if NO_TEXT_TOKEN not in prompt:
             prompt += (
                 "\n忽略礼盒、星星、人物等所有装饰性图形，不得将图形转换成 Emoji、"
@@ -4143,11 +4176,14 @@ class Api:
             return result
 
         output_format = getattr(self, '_current_output_format', 'text_only')
+        language = getattr(self, '_current_language', 'auto')
 
         def sanitize_text(text):
             text = remove_emoji(text)
             if NO_TEXT_TOKEN in text:
                 return ""
+            if language in ('auto', 'zh'):
+                text = to_simplified_chinese(text)
             if output_format != 'markdown':
                 text = remove_hash_symbol(text)
             return text

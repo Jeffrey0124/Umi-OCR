@@ -48,6 +48,15 @@ class AiOcrNormalizationTests(unittest.TestCase):
         self.assertEqual(result["code"], 100)
         self.assertEqual(result["data"][0]["text"], "# 礼包 ")
 
+    def test_traditional_chinese_is_normalized_to_simplified(self):
+        result = self.sanitize("超值兌換 每日寶箱 臺灣 ABC-123，50%")
+
+        self.assertEqual(result["code"], 100)
+        self.assertEqual(
+            result["data"][0]["text"],
+            "超值兑换 每日宝箱 台湾 ABC-123，50%",
+        )
+
     def test_no_text_token_becomes_no_text(self):
         for text in (
             "<<<UMI_OCR_NO_TEXT_7F3A>>>",
@@ -67,6 +76,15 @@ class AiOcrNormalizationTests(unittest.TestCase):
         self.assertIn("不得", prompt)
         self.assertIn("Emoji", prompt)
 
+    def test_prompt_requires_simplified_chinese(self):
+        self.api.global_config["a_prompt_text_only"] = "识别文字"
+        prompt = self.api._build_prompt(
+            {"output_format": "text_only", "language": "auto"}
+        )
+
+        self.assertIn("简体中文", prompt)
+        self.assertIn("不得输出繁体字", prompt)
+
     def test_all_configured_default_prompts_define_the_stable_output_rules(self):
         source = (PLUGIN_PATH.parent / "ai_ocr_config.py").read_text(encoding="utf-8")
 
@@ -83,6 +101,8 @@ class AiOcrNormalizationTests(unittest.TestCase):
                 self.assertIn("<<<UMI_OCR_NO_TEXT_7F3A>>>", match["body"])
                 self.assertIn("Emoji", match["body"])
                 self.assertIn("装饰", match["body"])
+                self.assertIn("简体中文", match["body"])
+                self.assertIn("繁体字", match["body"])
 
 
 if __name__ == "__main__":
