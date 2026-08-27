@@ -103,7 +103,7 @@ class BatchOCR(Page):
             "outputDatetimeUser": argd["startDatetimeUser"],
             "batchOcrCsvMode": True,
             "startDatetime": argd["startDatetime"],  # 开始日期
-            "ignoreBlank": argd["mission.ignoreBlank"],  # 忽略空白文件
+            "ignoreBlank": argd.get("mission.ignoreBlank", False),
         }
         try:
             for key in argd.keys():

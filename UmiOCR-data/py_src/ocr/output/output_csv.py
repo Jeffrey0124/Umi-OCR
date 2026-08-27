@@ -2,6 +2,7 @@
 
 import csv
 import os
+import re
 
 from umi_log import logger
 from .output import Output
@@ -62,16 +63,41 @@ class OutputCsv(Output):
             return
 
         target_dir = self._target_dir(res)
-        group = self.groups.setdefault(target_dir, {"text": [], "blank": []})
-        name = res["fileName"]
-        path = res["path"]
+        group = self.groups.setdefault(target_dir, [])
+        name = os.path.splitext(res["fileName"])[0]
+        folder = os.path.basename(os.path.normpath(res["dir"]))
+        path = os.path.abspath(res["path"])
+        text_out = ""
         if res["code"] == 100:
             text_out = getDataText(res["data"])
             if text_out.strip():
-                group["text"].append([text_out, name, path])
-                return
-        if not self.ignoreBlank:
-            group["blank"].append([name, path])
+                status = "成功"
+            else:
+                status = "无文字"
+                text_out = ""
+        elif res["code"] == 101 and not self._has_error_message(res["data"]):
+            status = "无文字"
+        else:
+            status = "失败"
+        group.append([text_out, name, folder, status, path])
+
+    def _has_error_message(self, data):
+        if isinstance(data, str):
+            return bool(data.strip())
+        return bool(data)
+
+    def _natural_path_key(self, path):
+        return [
+            int(part) if part.isdigit() else os.path.normcase(part)
+            for part in re.split(r"(\d+)", path)
+        ]
+
+    def _sorted_rows(self, rows):
+        status_order = {"成功": 0, "失败": 1, "无文字": 2}
+        return sorted(
+            rows,
+            key=lambda row: (status_order[row[3]], self._natural_path_key(row[4])),
+        )
 
     def _print_legacy(self, res):
         if res["code"] != 100 and self.ignoreBlank:
@@ -102,21 +128,36 @@ class OutputCsv(Output):
             return
 
         self.generatedPaths = []
-        for target_dir, group in self.groups.items():
-            file_name = self._file_name(target_dir)
-            main_path = os.path.join(target_dir, f"{file_name}.csv")
-            blank_path = os.path.join(target_dir, f"{file_name}_无文字.csv")
-            if group["text"]:
-                self._write_csv(main_path, ["ocr", "name", "path"], group["text"])
-                self.generatedPaths.append(main_path)
-            elif os.path.exists(main_path):
-                os.remove(main_path)
-            if group["blank"]:
-                self._write_csv(blank_path, ["name", "path"], group["blank"])
-                self.generatedPaths.append(blank_path)
-            elif os.path.exists(blank_path):
-                os.remove(blank_path)
+        headers = ["OCR", "Name", "文件夹", "识别状态", "路径"]
+        if self.outputDirType == "source":
+            all_rows = []
+            for target_dir, rows in self.groups.items():
+                file_name = self._file_name(target_dir)
+                output_path = os.path.join(target_dir, f"{file_name}.csv")
+                self._remove_old_blank_csv(target_dir, file_name)
+                self._write_csv(output_path, headers, self._sorted_rows(rows))
+                self.generatedPaths.append(output_path)
+                all_rows.extend(rows)
+
+            if all_rows:
+                root_dir = os.path.normpath(self.dir)
+                summary_name = f"{self._file_name(root_dir)}_总表"
+                summary_path = os.path.join(root_dir, f"{summary_name}.csv")
+                self._write_csv(summary_path, headers, self._sorted_rows(all_rows))
+                self.generatedPaths.append(summary_path)
+        else:
+            rows = [row for group in self.groups.values() for row in group]
+            if rows:
+                self._remove_old_blank_csv(self.dir, self.fileName)
+                output_path = os.path.join(self.dir, f"{self.fileName}.csv")
+                self._write_csv(output_path, headers, self._sorted_rows(rows))
+                self.generatedPaths.append(output_path)
         self.outputPath = self.generatedPaths[0] if self.generatedPaths else ""
+
+    def _remove_old_blank_csv(self, target_dir, file_name):
+        blank_path = os.path.join(target_dir, f"{file_name}_无文字.csv")
+        if os.path.exists(blank_path):
+            os.remove(blank_path)
 
     def _on_end_legacy(self):
         encoding = "utf-8"
