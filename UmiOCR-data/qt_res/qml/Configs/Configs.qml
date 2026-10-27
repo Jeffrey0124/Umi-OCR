@@ -237,6 +237,8 @@ Item {
                         break
                     // 无需检查
                     case "var": // 任意
+                    case "ai_profiles": // Versioned JSON string
+                    case "ai_profile": // Per-page profile ID
                     case "file": // 文件
                     case "text": // 文本
                     case "hotkey": // 热键
@@ -247,15 +249,17 @@ Item {
             if(!flag) { // 未有存储项或类型检查不合格，则取默认值
                 val = config.default
                 setValue(key, val) // 存储
-                console.log(`${key} 取默认值 ${val}`)
+                // Configuration values may contain credentials; only log the key.
+                console.log(`${key} 取默认值`)
             }
             config.fullKey = key // 记录完整key
             valueDict[key] = val // 设当前值
         }
         function handleConfigGroup(group, prefix="") { // 处理一个配置组
             for(let key in group) {
+                if(key === "uiKeys") continue
                 const config = group[key]
-                if(typeof config !== "object"){
+                if(!config || typeof config !== "object" || Array.isArray(config)){
                     continue
                 }
                 // 补充空白参数
@@ -380,10 +384,13 @@ Item {
         }
         compDict = {}
 
-        function handleConfigGroup(group, parent=panelContainer) { // 处理一个配置组
+        function handleConfigGroup(group, parent=panelContainer, grouped=false) { // 处理一个配置组
             for(let key in group) {
+                if(key === "uiKeys") continue
                 const config = group[key]
-                if(typeof config !== "object")
+                if(!config || typeof config !== "object" || Array.isArray(config))
+                    continue
+                if(config.uiGrouped && !grouped)
                     continue
                 if(! (typeof config.title === "string")) // 无标题，则表示不生成组件
                     continue
@@ -396,7 +403,14 @@ Item {
                     const fold = config.fold?true:false // 是否折叠，转布尔值
                     const obj = comp.createObject(parent, {"key":config.fullKey, "configs":configs})
                     compList.push(obj) // 保存组件引用
-                    handleConfigGroup(config, obj.container) // 递归下一层，父级变成本层
+                    if(config.uiKeys) {
+                        const items = {}
+                        for(let n=0; n<config.uiKeys.length; n++)
+                            items[config.uiKeys[n]] = group[config.uiKeys[n]]
+                        handleConfigGroup(items, obj.container, true)
+                    } else {
+                        handleConfigGroup(config, obj.container)
+                    }
                 }
                 // 若是配置项
                 else {
@@ -698,7 +712,11 @@ Item {
         "number": compNumber,
         "hotkey": compHotkey,
         "buttons": compBtns,
+        "ai_profiles": compAiProfiles,
+        "ai_profile": compAiProfile,
     }
+    Component { id: compAiProfiles; AiProfiles {} }
+    Component { id: compAiProfile; AiProfileSelector {} }
     // 配置项：布尔值
     Component {
         id: compBoolean

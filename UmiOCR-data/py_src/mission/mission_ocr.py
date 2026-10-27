@@ -9,6 +9,7 @@
 """
 
 import os
+import copy
 
 from umi_log import logger
 from .mission import Mission
@@ -35,6 +36,7 @@ class __MissionOcrClass(Mission):
         super().__init__()
         self._apiKey = ""  # 当前api类型
         self._api = None  # 当前引擎api对象
+        self._aiConfig = None
 
     # ========================= 【重载】 =========================
 
@@ -62,6 +64,12 @@ class __MissionOcrClass(Mission):
             elif "bytes" not in msnList[i] and "base64" not in msnList[i]:
                 logger.warning(f"添加OCR任务时，第{i}项不含 path、bytes、base64")
                 del msnList[i]
+        if self._apiKey == "AIOCR" and hasattr(self._api, "snapshotConfig"):
+            try:
+                # Freeze at submission, before the scheduler can switch queues.
+                msnInfo["_aiConfigSnapshot"] = self.snapshotConfig(argd)
+            except ValueError as error:
+                return "[Error] " + str(error)
         return super().addMissionList(msnInfo, msnList)
 
     def msnPreTask(self, msnInfo):  # 用于更新api和参数
@@ -70,6 +78,13 @@ class __MissionOcrClass(Mission):
             return "[Error] MissionOCR: API object is None."
         # 检查参数更新
         startInfo = self._dictShortKey(msnInfo["argd"])
+        if hasattr(self._api, "snapshotConfig"):
+            if "_aiConfigSnapshot" not in msnInfo:
+                try:
+                    msnInfo["_aiConfigSnapshot"] = self._api.snapshotConfig(startInfo)
+                except ValueError as error:
+                    return "[Error] " + str(error)
+            startInfo["_ai_config_snapshot"] = msnInfo["_aiConfigSnapshot"]
         # 恢复int类型
         argdIntConvert(startInfo)
         msg = self._api.start(startInfo)
@@ -115,16 +130,30 @@ class __MissionOcrClass(Mission):
 
     # ========================= 【qml接口】 =========================
 
+    def snapshotConfig(self, argd):
+        if self._apiKey == "AIOCR" and hasattr(self._api, "snapshotConfig"):
+            # Document pages inherit the snapshot fixed when the document was queued.
+            snapshot = argd.get("ocr.AIOCR._ai_config_snapshot")
+            if snapshot is not None:
+                return copy.deepcopy(snapshot)
+            return self._api.snapshotConfig(self._dictShortKey(argd), self._aiConfig)
+        return None
+
     def getStatus(self):  # 返回当前状态
+        from .mission_doc import MissionDOC
         return {
             "apiKey": self._apiKey,
             "missionListsLength": self.getMissionListsLength(),
+            "pausedMissionListsLength": {str(k): len(v[1]) for k, v in self._msnPausedDict.copy().items()},
+            "documentMissionListsLength": MissionDOC.getMissionListsLength(),
+            "pausedDocumentMissionListsLength": {str(k): len(v[1]) for k, v in MissionDOC._msnPausedDict.copy().items()},
         }
 
     def setApi(self, apiKey, info):  # 设置api
         # 成功返回 [Success] ，失败返回 [Error] 开头的字符串
         self._apiKey = apiKey
         info = self._dictShortKey(info)
+        self._aiConfig = copy.deepcopy(info) if apiKey == "AIOCR" else None
         # 如果api对象已启动，则先停止
         if self._api:
             self._api.stop()
@@ -140,8 +169,12 @@ class __MissionOcrClass(Mission):
             self._api = res
             return "[Success]"
 
-    # 将字典中配置项的长key转为短key
-    # 如： ocr.win32_PaddleOCR-json.path → path
+    def updateAiConfig(self, info):
+        """New queues may use saved profiles while existing queues keep snapshots."""
+        if self._apiKey == "AIOCR":
+            self._aiConfig = copy.deepcopy(self._dictShortKey(info))
+
+    # 将字典中配置项的长key转为短key，如 ocr.win32_PaddleOCR-json.path → path
     def _dictShortKey(self, d):
         newD = {}
         key1 = "ocr."

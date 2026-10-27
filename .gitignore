@@ -1,6 +1,14 @@
 # User-specific runtime settings (may contain API keys)
 UmiOCR-data/.settings
 UmiOCR-data/.pre_settings
+installer/generated/
+
+# Release binaries and local verification outputs
+/dist/
+/.scratch/team-installer-secret-safety/retired-artifacts/
+/.scratch/ai-provider-model-manager/previews*/
+/.scratch/ai-provider-model-manager/test-*.txt
+/.scratch/ai-provider-model-manager/release-*.json
 
 # Generated caches and temporary files
 **/__pycache__/

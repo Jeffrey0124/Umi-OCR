@@ -80,6 +80,13 @@ class _MissionDocClass(Mission):
     # pageList: 指定多个页数。可选： [] 使用pageRange设置 , [1,2,3] 指定页数
     # password: 密码（非必填）
     def addMission(self, msnInfo, msnPath, pageRange=None, pageList=[], password=""):
+        if msnInfo["argd"].get("doc.extractionMode") != "textOnly":
+            try:
+                snapshot = MissionOCR.snapshotConfig(msnInfo["argd"])
+                if snapshot is not None:
+                    msnInfo["argd"] = dict(msnInfo["argd"], **{"ocr.AIOCR._ai_config_snapshot": snapshot})
+            except ValueError as error:
+                return "[Error] " + str(error)
         # =============== 加载文档，获取文档操作对象 ===============
         try:
             doc = fitz.open(msnPath)

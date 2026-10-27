@@ -171,6 +171,27 @@ Item {
     property var localOptions: {} // 缓存局部配置
     property var pyOptions: undefined // 由py定义的配置参数的原始内容
 
+    property bool aiApplyPending: false
+    function requestAiApply() {
+        if(qmlapp.globalConfigs.getValue("ocr.api") !== "AIOCR") return
+        const all = qmlapp.globalConfigs.getValueDict()
+        const info = {}
+        for(let key in all) if(key.startsWith("ocr.AIOCR.")) info[key] = all[key]
+        qmlapp.msnConnector.callPy("ocr", "updateAiConfig", [info])
+        aiApplyPending = true
+        applyAiWhenIdle()
+    }
+    function applyAiWhenIdle() {
+        if(!aiApplyPending) return
+        if(qmlapp.globalConfigs.getValue("ocr.api") !== "AIOCR") { aiApplyPending = false; return }
+        const status = qmlapp.msnConnector.callPy("ocr", "getStatus", [])
+        const queueKeys = ["missionListsLength", "pausedMissionListsLength", "documentMissionListsLength", "pausedDocumentMissionListsLength"]
+        if(queueKeys.some(key => Object.keys(status[key] || {}).length > 0)) return
+        aiApplyPending = false
+        applyConfigs(false)
+    }
+    Timer { interval: 500; repeat: true; running: aiApplyPending; onTriggered: applyAiWhenIdle() }
+
     Component.onCompleted: {
         deployDict = {}
     }

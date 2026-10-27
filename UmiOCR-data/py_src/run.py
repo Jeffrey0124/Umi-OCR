@@ -84,6 +84,7 @@ def runQml(engineAddImportPath):
         KeyMouseConnector,
     )
     from .plugins_controller.plugins_connector import PluginsConnector  # 插件连接器
+    from .plugins_controller.ai_config_connector import AiConfigConnector
     from .utils.utils_connector import UtilsConnector  # 通用连接器
     from .utils.global_configs_connector import GlobalConfigsConnector  # 全局配置连接器
     from .utils.theme_connector import ThemeConnector  # 主题连接器
@@ -97,6 +98,7 @@ def runQml(engineAddImportPath):
     qmlRegisterType(KeyMouseConnector, "KeyMouseConnector", 1, 0, "KeyMouseConnector")
     qmlRegisterType(UtilsConnector, "UtilsConnector", 1, 0, "UtilsConnector")
     qmlRegisterType(PluginsConnector, "PluginsConnector", 1, 0, "PluginsConnector")
+    qmlRegisterType(AiConfigConnector, "AiConfigConnector", 1, 0, "AiConfigConnector")
     qmlRegisterType(ThemeConnector, "ThemeConnector", 1, 0, "ThemeConnector")
     qmlRegisterType(ImageConnector, "ImageConnector", 1, 0, "ImageConnector")
     qmlRegisterType(

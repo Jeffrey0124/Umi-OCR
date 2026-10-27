@@ -8,6 +8,10 @@ tr = Translator(__file__, "i18n.csv")
 
 # 服务商配置映射
 PROVIDER_CONFIGS = {
+    "yaoji": {
+        "api_base": "https://llm-proxy.yuwan-game.com/v1",
+        "model": "",
+    },
     "openai": {
         "api_base": "https://api.openai.com/v1",
         "model": "",  # 用户自定义
@@ -186,8 +190,9 @@ globalOptions = {
     # 使用 a_ 前缀确保基础设置排在最前面
     "a_provider": {
         "title": tr("当前AI服务商"),
-        "default": "openai",
+        "default": "yaoji",
         "optionsList": [
+            ["yaoji", "姚记「梅花工作室」"],
             ["openai", "OpenAI"],
             ["custom_openai", tr("自定义OpenAI兼容 (Custom)")],
             ["gemini", "Google Gemini"],
@@ -306,6 +311,11 @@ globalOptions = {
         "type": "text",
         "toolTip": tr("OpenAI模型名称，如：gpt-5-mini, gpt-4o"),
     },
+
+    # 内置姚记服务商；密钥始终由用户配置，不随程序分发。
+    "yaoji_api_key": {"default": "", "type": "text"},
+    "yaoji_model": {"default": "", "type": "text"},
+    "yaoji_api_base": {"default": PROVIDER_CONFIGS["yaoji"]["api_base"], "type": "text"},
 
     # 自定义OpenAI兼容服务商配置
     "custom_openai_api_key": {
@@ -760,6 +770,30 @@ globalOptions = {
     },
 }
 
+# Keep the legacy keys flat for compatibility, but render only the profile manager.
+for _provider in PROVIDER_CONFIGS:
+    for _suffix in ("api_key", "api_base", "model"):
+        if _provider + "_" + _suffix in globalOptions:
+            globalOptions[_provider + "_" + _suffix].pop("title", None)
+for _key in ("a_provider", "a_timeout", "z_proxy_url"):
+    globalOptions[_key].pop("title", None)
+
+globalOptions = {
+    "title": globalOptions["title"], "type": "group",
+    "a_profiles": {"title": tr("AI 模型配置"), "type": "ai_profiles", "default": ""},
+    **globalOptions,
+}
+for _group, _title, _keys in (
+    ("prompt_settings", "识别提示词", ["a_prompt_text_only", "a_prompt_with_coordinates", "a_prompt_markdown"]),
+    ("detector_settings", "文字检测器", ["a_v6_detector_version", "a_v6_model_size"]),
+    ("request_settings", "并发与限速", ["z_max_concurrent", "z_rate_limit"]),
+):
+    for _key in _keys:
+        globalOptions[_key]["uiGrouped"] = True
+        globalOptions[_key].pop("advanced", None)
+    globalOptions[_group] = {"title": tr(_title), "type": "group", "enabledFold": True,
+                             "fold": True, "uiKeys": _keys}
+
 # 局部配置项
 localOptions = {
     "title": tr("文字识别（AI OCR）"),
@@ -997,3 +1031,10 @@ localOptions = {
         "toolTip": tr("【仅VL-1.6】启用表格合并功能，合并跨页或分割的表格。"),
     },
 }
+
+# A dedicated selector reads saved profiles dynamically; retain the old key only
+# for one-time page migration and command-line compatibility.
+localOptions["a_l_provider"].pop("title", None)
+localOptions = {"title": localOptions["title"], "type": "group",
+                "a_l_profile": {"title": tr("AI 配置"), "type": "ai_profile", "default": ""},
+                **localOptions}

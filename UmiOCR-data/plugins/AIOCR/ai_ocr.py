@@ -2,6 +2,7 @@
 # AI OCR API Implementation with Multi-Provider Support
 
 import json
+import copy
 import base64
 import time
 import re
@@ -1743,6 +1744,7 @@ class ProviderFactory:
     @staticmethod
     def create_provider(provider_name, api_key, api_base=None, model=None, timeout=30, proxy_url=None):
         providers = {
+            "yaoji": OpenAIProvider,
             "openai": OpenAIProvider,
             "custom_openai": OpenAIProvider,  # 自定义OpenAI兼容服务商，复用OpenAI实现
             "gemini": GeminiProvider,
@@ -1781,8 +1783,12 @@ class ProviderFactory:
         
         # 如果没有提供api_base，使用内置的默认值
         if api_base is None:
-            temp_provider = provider_class(api_key)
-            api_base = temp_provider.get_default_api_base()
+            if provider_name == "yaoji":
+                from .ai_ocr_config import get_provider_default_api_base
+                api_base = get_provider_default_api_base(provider_name)
+            else:
+                temp_provider = provider_class(api_key)
+                api_base = temp_provider.get_default_api_base()
         
         # 模型由用户在配置中指定，不使用默认值
         if not model:
@@ -2164,7 +2170,8 @@ class Api:
         self.executor = None
         
         # 保存全局配置
-        self.global_config = globalArgd
+        self._base_global_config = copy.deepcopy(globalArgd)
+        self.global_config = copy.deepcopy(globalArgd)
         
         # 添加图像尺寸追踪变量
         self.original_size = None  # 保存原始图像尺寸
@@ -2182,18 +2189,21 @@ class Api:
 
         print(f"AI OCR 插件初始化完成，当前服务商: {provider}")
 
+    def snapshotConfig(self, argd, config=None):
+        from .profile_store import resolve_config
+        config, warning = resolve_config(self._base_global_config if config is None else config, argd)
+        if warning:
+            print("[AIOCR] " + warning)
+        return config
+
     def start(self, argd):
         """启动API"""
         try:
             # 保存局部配置
             self.local_config = argd
 
-            # 局部 a_l_provider 覆盖全局 a_provider（联动机制）
-            # a_l_provider 为空表示"跟随全局设置"，非空则覆盖全局并同步
-            local_provider = argd.get("a_l_provider", "")
-            if local_provider:
-                self.global_config["a_provider"] = local_provider
-                self.global_config["provider"] = local_provider  # 向后兼容
+            # Each queue owns a frozen configuration; page overrides never change defaults.
+            self.global_config = copy.deepcopy(argd.get("_ai_config_snapshot")) if "_ai_config_snapshot" in argd else self.snapshotConfig(argd)
 
             # 获取配置（兼容新旧键名）
             provider_name = self.global_config.get("a_provider", self.global_config.get("provider", "openai"))
@@ -2215,7 +2225,7 @@ class Api:
             proxy_url = self.global_config.get("z_proxy_url", self.global_config.get("proxy_url", ""))
             
             # 对于本地服务（Ollama、LM Studio），API密钥可以为空
-            if not api_key and provider_name not in ["ollama", "lmstudio"]:
+            if not api_key and provider_name not in ["ollama", "lmstudio", "llamacpp"]:
                 return f"[Error] {provider_name} 的API密钥不能为空，请在设置中配置"
             
             if not model:
@@ -2254,6 +2264,8 @@ class Api:
                 max_workers = self.max_concurrent
             
             # 创建线程池
+            if self.executor:
+                self.executor.shutdown(wait=True)
             self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
             
             return ""
